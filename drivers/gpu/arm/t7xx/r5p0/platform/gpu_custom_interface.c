@@ -292,7 +292,10 @@ static ssize_t set_volt_table(struct device *dev, struct device_attribute *attr,
 		}
 	}
 
+<<<<<<< HEAD
 	ipa_update();
+=======
+>>>>>>> ac3dd2a... gpu: arm: Add Exynos Mali voltage control
 	spin_unlock_irqrestore(&platform->gpu_dvfs_spinlock, flags);
 
 	return count;
