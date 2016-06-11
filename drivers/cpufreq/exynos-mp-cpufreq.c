@@ -26,6 +26,7 @@
 #include <linux/reboot.h>
 #include <linux/delay.h>
 #include <linux/cpu.h>
+#include <linux/ipa.h>
 #include <linux/pm_qos.h>
 #include <linux/kobject.h>
 #include <linux/sysfs.h>
@@ -36,7 +37,9 @@
 #include <linux/muic/muic.h>
 #include <linux/muic/muic_notifier.h>
 #endif
+
 #include <linux/sysfs_helpers.h>
+
 #include <asm/smp_plat.h>
 #include <asm/cputype.h>
 
@@ -58,8 +61,8 @@
 #define POWER_COEFF_15P		57 /* percore param */
 #define POWER_COEFF_7P		11 /* percore  param */
 #elif defined(CONFIG_SOC_EXYNOS7420)
-#define POWER_COEFF_15P		46 /* percore param */
-#define POWER_COEFF_7P		13 /* percore  param */
+#define POWER_COEFF_15P		59 /* percore param */
+#define POWER_COEFF_7P		17 /* percore  param */
 #else
 #define POWER_COEFF_15P		48 /* percore param */
 #define POWER_COEFF_7P		9 /* percore  param */
@@ -67,7 +70,7 @@
 
 #ifdef CONFIG_SOC_EXYNOS7420
 #define CL0_MAX_VOLT		1175000
-#define CL1_MAX_VOLT		1125000
+#define CL1_MAX_VOLT		1225000
 #define CL0_MIN_VOLT		500000
 #define CL1_MIN_VOLT		500000
 #define CL_MAX_VOLT(cl)		(cl == CL_ZERO ? CL0_MAX_VOLT : CL1_MAX_VOLT)
@@ -75,6 +78,15 @@
 #define CL_VOLT_STEP		6250
 #else
 #error "Please define core voltage ranges for current SoC."
+#endif
+
+#ifdef CONFIG_SOC_EXYNOS7420
+#define CL0_MIN_FREQ		400000
+#define CL0_MAX_FREQ		1500000
+#define CL1_MIN_FREQ		800000
+#define CL1_MAX_FREQ		2100000
+#else
+#error "Please define core frequency ranges for current SoC."
 #endif
 
 #define VOLT_RANGE_STEP		25000
@@ -1128,6 +1140,7 @@ static struct notifier_block exynos_tmu_nb = {
 static int exynos_cpufreq_cpu_init(struct cpufreq_policy *policy)
 {
 	unsigned int cur = get_cur_cluster(policy->cpu);
+	int ret;
 
 	pr_debug("%s: cpu[%d]\n", __func__, policy->cpu);
 
@@ -1145,8 +1158,15 @@ static int exynos_cpufreq_cpu_init(struct cpufreq_policy *policy)
 		cpumask_copy(policy->cpus, &cluster_cpus[CL_ZERO]);
 		cpumask_copy(policy->related_cpus, &cluster_cpus[CL_ZERO]);
 	}
+	
+	ret = cpufreq_frequency_table_cpuinfo(policy, exynos_info[cur]->freq_table);
+	
+	if (!ret) {
+		policy->min = cur == CL_ONE ? CL1_MIN_FREQ : CL0_MIN_FREQ;
+		policy->max = cur == CL_ONE ? CL1_MAX_FREQ : CL0_MAX_FREQ;
+	}
 
-	return cpufreq_frequency_table_cpuinfo(policy, exynos_info[cur]->freq_table);
+	return ret;
 }
 
 static struct cpufreq_driver exynos_driver = {
@@ -1456,10 +1476,10 @@ inline ssize_t set_boot_low_freq(const char *buf, size_t count)
 					PM_QOS_DEFAULT_VALUE);
 	}
 
-	return count;
+ 	return count;
 }
 
-
+static size_t get_freq_table_size(struct cpufreq_frequency_table *freq_table)
 {
 	size_t tbl_sz = 0;
 	int i;
@@ -1550,7 +1570,6 @@ static ssize_t store_volt_table(struct kobject *kobj, struct attribute *attr,
 	return count;
 }
 
-
 static ssize_t show_cluster1_freq_table(struct kobject *kobj,
 				struct attribute *attr, char *buf)
 {
@@ -1579,6 +1598,18 @@ static ssize_t store_cluster1_max_freq(struct kobject *kobj, struct attribute *a
 					const char *buf, size_t count)
 {
 	return store_core_freq(buf, count, CL_ONE, true);
+}
+
+static ssize_t show_cluster1_volt_table(struct kobject *kobj,
+				struct attribute *attr, char *buf)
+{
+	return show_volt_table(kobj, attr, buf, CL_ONE);
+}
+
+static ssize_t store_cluster1_volt_table(struct kobject *kobj, struct attribute *attr,
+					const char *buf, size_t count)
+{
+	return store_volt_table(kobj, attr, buf, count, CL_ONE);
 }
 
 static ssize_t show_cluster0_freq_table(struct kobject *kobj,
@@ -1623,21 +1654,37 @@ static ssize_t store_boot_low_freq(struct kobject *kobj, struct attribute *attr,
 	return set_boot_low_freq(buf, count);
 }
 
+static ssize_t show_cluster0_volt_table(struct kobject *kobj,
+				struct attribute *attr, char *buf)
+{
+	return show_volt_table(kobj, attr, buf, CL_ZERO);
+}
+
+static ssize_t store_cluster0_volt_table(struct kobject *kobj, struct attribute *attr,
+					const char *buf, size_t count)
+{
+	return store_volt_table(kobj, attr, buf, count, CL_ZERO);
+}
+
 define_one_global_ro(cluster1_freq_table);
 define_one_global_rw(cluster1_min_freq);
 define_one_global_rw(cluster1_max_freq);
+define_one_global_rw(cluster1_volt_table);
 define_one_global_ro(cluster0_freq_table);
 define_one_global_rw(cluster0_min_freq);
 define_one_global_rw(cluster0_max_freq);
+define_one_global_rw(cluster0_volt_table);
 define_one_global_rw(boot_low_freq);
 
 static struct attribute *mp_attributes[] = {
 	&cluster1_freq_table.attr,
 	&cluster1_min_freq.attr,
 	&cluster1_max_freq.attr,
+	&cluster1_volt_table.attr,
 	&cluster0_freq_table.attr,
 	&cluster0_min_freq.attr,
 	&cluster0_max_freq.attr,
+	&cluster0_volt_table.attr,
 	&boot_low_freq.attr,
 	NULL
 };
